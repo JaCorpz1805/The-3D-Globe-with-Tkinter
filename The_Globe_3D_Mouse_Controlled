@@ -1,1 +1,128 @@
 
+import tkinter as tk
+import math
+
+class Root(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Mouse controlled 3D globe")
+        self.configure(background="#2C3E50")
+        self.minsize(200, 200)
+        self.geometry("500x500+50+50")
+        self.resizable(True, True)
+        self.state("zoomed")
+
+        self.canvas1 = tk.Canvas(self, bg="#2C3E50", highlightthickness=0)
+        self.canvas1.pack(fill="both", expand=True)
+
+        # 3D parameters
+        self.radius = 150
+        self.num_lat = 12   # number of latitude rings
+        self.num_lon = 16   # number of longitude segments
+        self.angle_x = 0.0
+        self.angle_y = 0.0
+
+        # build the sphere as a lat/long grid of 3D points
+        self.points = self.build_sphere()
+
+        # mouse drag state
+        self.last_x = 0
+        self.last_y = 0
+
+        self.canvas1.bind("<ButtonPress-1>", self.on_mouse_down)
+        self.canvas1.bind("<B1-Motion>", self.on_mouse_drag)
+        self.bind("<Configure>", lambda e: self.render())
+
+        self.render()
+
+    def build_sphere(self):
+        """Generate 3D points on a sphere using latitude/longitude rings."""
+        pts = []
+        for i in range(self.num_lat + 1):
+            lat = math.pi * i / self.num_lat - math.pi / 2  # -90 to +90 deg
+            ring = []
+            for j in range(self.num_lon):
+                lon = 2 * math.pi * j / self.num_lon
+                x = self.radius * math.cos(lat) * math.cos(lon)
+                y = self.radius * math.sin(lat)
+                z = self.radius * math.cos(lat) * math.sin(lon)
+                ring.append([x, y, z])
+            pts.append(ring)
+        return pts
+
+    def rotate_point(self, x, y, z):
+        """Apply rotation around X and Y axes."""
+        # rotate around Y axis
+        cos_y, sin_y = math.cos(self.angle_y), math.sin(self.angle_y)
+        x, z = x * cos_y - z * sin_y, x * sin_y + z * cos_y
+
+        # rotate around X axis
+        cos_x, sin_x = math.cos(self.angle_x), math.sin(self.angle_x)
+        y, z = y * cos_x - z * sin_x, y * sin_x + z * cos_x
+
+        return x, y, z
+
+    def project(self, x, y, z):
+        """Simple perspective projection to 2D screen coords."""
+        distance = 500
+        factor = distance / (distance + z)
+        cx = self.canvas1.winfo_width() / 2
+        cy = self.canvas1.winfo_height() / 2
+        px = cx + x * factor
+        py = cy + y * factor
+        return px, py, z
+
+    def render(self):
+        self.canvas1.delete("all")
+
+        # rotate + project every point, keep z for depth-based shading
+        rotated = []
+        for ring in self.points:
+            new_ring = []
+            for (x, y, z) in ring:
+                rx, ry, rz = self.rotate_point(x, y, z)
+                new_ring.append(self.project(rx, ry, rz))
+            rotated.append(new_ring)
+
+        # draw longitude lines (connect same j across all rings)
+        for j in range(self.num_lon):
+            for i in range(self.num_lat):
+                x1, y1, z1 = rotated[i][j]
+                x2, y2, z2 = rotated[i + 1][j]
+                shade = self.shade_from_z((z1 + z2) / 2)
+                self.canvas1.create_line(x1, y1, x2, y2, fill=shade)
+
+        # draw latitude rings (connect points within each ring)
+        for i in range(self.num_lat + 1):
+            ring = rotated[i]
+            for j in range(self.num_lon):
+                x1, y1, z1 = ring[j]
+                x2, y2, z2 = ring[(j + 1) % self.num_lon]
+                shade = self.shade_from_z((z1 + z2) / 2)
+                self.canvas1.create_line(x1, y1, x2, y2, fill=shade)
+
+    def shade_from_z(self, z):
+        """Fake lighting: points closer to viewer (smaller z) are brighter."""
+        t = max(0, min(1, (z + self.radius) / (2 * self.radius)))
+        # interpolate between a dim and bright blue-white
+        r = int(80 + (255 - 80) * (1 - t))
+        g = int(140 + (255 - 140) * (1 - t))
+        b = int(200 + (255 - 200) * (1 - t))
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+    def on_mouse_down(self, event):
+        self.last_x = event.x
+        self.last_y = event.y
+
+    def on_mouse_drag(self, event):
+        dx = event.x - self.last_x
+        dy = event.y - self.last_y
+        self.angle_y += dx * 0.01
+        self.angle_x += dy * 0.01
+        self.last_x = event.x
+        self.last_y = event.y
+        self.render()
+
+if __name__ == "__main__":
+    root = Root()
+    root.mainloop()
